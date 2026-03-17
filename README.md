@@ -67,7 +67,7 @@ scrapling install
 直接告诉 AI 你要读取的 URL，会自动选择最佳方案：
 
 ```
-帮我读取这篇文章：https://example.com/article
+帮我读取这篇文章：[https://example.com/article](https://mp.weixin.qq.com/s/EwVItQH4JUsONqv_Fmi4wQ)
 用 Scrapling 读取这篇公众号：https://mp.weixin.qq.com/s/EwVItQH4JUsONqv_Fmi4wQ
 ```
 
