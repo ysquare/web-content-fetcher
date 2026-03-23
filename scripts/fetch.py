@@ -116,6 +116,59 @@ def fix_wechat_code_blocks(html_raw):
     return html_raw
 
 
+def fix_wechat_fake_headings(html_raw):
+    """
+    WeChat's rich editor abuses heading tags (h1-h3) for styling — the actual
+    font-size is often 14-17px, i.e. body text. Demote these fake headings to
+    plain <p> tags so html2text doesn't turn every paragraph into a heading.
+
+    Heuristic: if the heading's inline style contains font-size <= 17px, or
+    the heading contains a <span> with font-size <= 17px, it's fake.
+    """
+    def _demote(m):
+        tag_html = m.group(0)
+        open_tag = m.group(1)  # e.g. "h1" or "h3"
+        # Check for font-size in the tag or its children
+        sizes = re.findall(r'font-size:\s*(\d+)px', tag_html)
+        if sizes:
+            max_size = max(int(s) for s in sizes)
+            if max_size <= 17:
+                # Replace opening and closing heading tags with <p>
+                tag_html = re.sub(rf'^<{open_tag}\b', '<p', tag_html, count=1)
+                tag_html = re.sub(rf'</{open_tag}>\s*$', '</p>', tag_html, count=1)
+        return tag_html
+
+    return re.sub(
+        r'<(h[1-3])\b[^>]*>.*?</\1>',
+        _demote,
+        html_raw,
+        flags=re.DOTALL,
+    )
+
+
+def fix_wechat_inline_code_links(html_raw):
+    """
+    WeChat wraps standalone URLs in <pre><code>...</code></pre> blocks,
+    producing fenced code blocks in Markdown. When a <pre> block's only
+    text content is a short line with a URL (e.g. "开源地址：https://..."),
+    convert it to a plain <p> so the URL renders as regular text.
+    """
+    def _replace(m):
+        inner = m.group(1)
+        text = re.sub(r'<[^>]+>', '', inner).strip()
+        # Only convert if it's short (< 200 chars) and contains a URL
+        if len(text) < 200 and re.search(r'https?://', text):
+            return f'<p>{text}</p>'
+        return m.group(0)
+
+    return re.sub(
+        r'<pre[^>]*>.*?<code[^>]*>(.*?)</code>.*?</pre>',
+        _replace,
+        html_raw,
+        flags=re.DOTALL,
+    )
+
+
 # CSS selectors in priority order — the first match with enough content wins.
 # Covers most blog/article platforms without needing per-site customization.
 CONTENT_SELECTORS = [
@@ -147,12 +200,15 @@ WECHAT_SELECTORS = [
 MIN_CONTENT_LENGTH = 200
 
 
-def html_to_markdown(html_raw, max_chars=30000):
+def html_to_markdown(html_raw, max_chars=30000, is_wechat=False):
     """Convert raw HTML to clean Markdown."""
     import html2text
 
     html_raw = fix_lazy_images(html_raw)
     html_raw = fix_wechat_code_blocks(html_raw)
+    if is_wechat:
+        html_raw = fix_wechat_fake_headings(html_raw)
+        html_raw = fix_wechat_inline_code_links(html_raw)
 
     h = html2text.HTML2Text()
     h.ignore_links = False
@@ -169,24 +225,56 @@ def html_to_markdown(html_raw, max_chars=30000):
     return md[:max_chars]
 
 
+def extract_title(page, url):
+    """
+    Extract page title from HTML. Tries multiple sources in order:
+    og:title, <title> tag, first <h1>.
+    """
+    # Try og:title first (most reliable for articles)
+    og = page.css('meta[property="og:title"]')
+    if og:
+        val = og[0].attrib.get("content", "").strip()
+        if val:
+            return val
+
+    # Try <title> tag
+    title_els = page.css("title")
+    if title_els:
+        val = title_els[0].text.strip()
+        if val:
+            # Strip common suffixes like " - 少数派" or " | Medium"
+            val = re.split(r"\s*[|\-–—_]\s*(?=[^|\-–—_]*$)", val)[0].strip()
+            return val
+
+    # Try first <h1>
+    h1 = page.css("h1")
+    if h1:
+        val = h1[0].text.strip()
+        if val:
+            return val
+
+    return ""
+
+
 def extract_content(page, url, max_chars=30000):
     """
     Try content selectors to find the article body.
-    Returns (markdown_text, matched_selector).
+    Returns (markdown_text, matched_selector, title).
     """
+    title = extract_title(page, url)
     is_wechat = "mp.weixin.qq.com" in url
     selectors = (WECHAT_SELECTORS + CONTENT_SELECTORS) if is_wechat else CONTENT_SELECTORS
 
     for selector in selectors:
         els = page.css(selector)
         if els:
-            md = html_to_markdown(els[0].html_content, max_chars)
+            md = html_to_markdown(els[0].html_content, max_chars, is_wechat=is_wechat)
             if len(md) >= MIN_CONTENT_LENGTH:
-                return md, selector
+                return md, selector, title
 
     # Fallback: convert the entire page
-    md = html_to_markdown(page.html_content, max_chars)
-    return md, "body(fallback)"
+    md = html_to_markdown(page.html_content, max_chars, is_wechat=is_wechat)
+    return md, "body(fallback)", title
 
 
 def _suppress_scrapling_logs():
@@ -226,27 +314,27 @@ def fetch_stealth(url, max_chars=30000, timeout=30000):
 
 def fetch(url, max_chars=30000, stealth=False):
     """
-    Main entry point. Fetches URL and returns (markdown, selector, mode).
+    Main entry point. Fetches URL and returns (markdown, selector, mode, title).
     If stealth=False, tries fast mode first and falls back to stealth
     when the result is too short (likely a JS-rendered page).
     """
     if stealth:
-        md, selector = fetch_stealth(url, max_chars)
-        return md, selector, "stealth"
+        md, selector, title = fetch_stealth(url, max_chars)
+        return md, selector, "stealth", title
 
     # Try fast mode first
-    md, selector = fetch_fast(url, max_chars)
+    md, selector, title = fetch_fast(url, max_chars)
 
     # If fast mode got barely any content, the page likely needs JS rendering
     if len(md) < MIN_CONTENT_LENGTH:
         try:
-            md_stealth, sel_stealth = fetch_stealth(url, max_chars)
+            md_stealth, sel_stealth, title_stealth = fetch_stealth(url, max_chars)
             if len(md_stealth) > len(md):
-                return md_stealth, sel_stealth, "stealth(auto-fallback)"
+                return md_stealth, sel_stealth, "stealth(auto-fallback)", title_stealth
         except Exception:
             pass  # Stick with fast mode result
 
-    return md, selector, "fast"
+    return md, selector, "fast", title
 
 
 DEFAULT_SAVE_DIR = "download"
@@ -284,8 +372,10 @@ def url_to_filename(url):
     return name
 
 
-def save_markdown(md, url, save_dir):
-    """Save markdown content to a .md file in save_dir. Returns the file path."""
+def save_markdown(md, url, save_dir, title="", mode="", selector=""):
+    """Save markdown content with YAML frontmatter to a .md file. Returns the file path."""
+    from datetime import datetime, timezone
+
     dir_path = Path(save_dir)
     dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -301,7 +391,28 @@ def save_markdown(md, url, save_dir):
                 filepath = candidate
                 break
 
-    filepath.write_text(md, encoding="utf-8")
+    # Build YAML frontmatter
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Escape quotes in title for YAML safety
+    safe_title = title.replace('"', '\\"') if title else ""
+    frontmatter_lines = [
+        "---",
+        f'title: "{safe_title}"',
+        f"source: {url}",
+        f"fetched_at: {now}",
+        f"fetch_mode: {mode}",
+        f"selector: {selector}",
+        "---",
+    ]
+    frontmatter = "\n".join(frontmatter_lines)
+
+    # Prepend title as H1 if not already present in content
+    body = md
+    if title and not md.lstrip().startswith("# "):
+        body = f"# {title}\n\n{md}"
+
+    content = f"{frontmatter}\n\n{body}\n"
+    filepath.write_text(content, encoding="utf-8")
     return str(filepath)
 
 
@@ -340,15 +451,16 @@ def main():
     max_chars = int(args[0]) if args else 30000
 
     try:
-        md, selector, mode = fetch(url, max_chars, stealth=stealth)
+        md, selector, mode, title = fetch(url, max_chars, stealth=stealth)
 
         if save_dir:
-            filepath = save_markdown(md, url, save_dir)
+            filepath = save_markdown(md, url, save_dir, title=title, mode=mode, selector=selector)
             print(f"Saved to: {filepath}", file=sys.stderr)
 
         if json_output:
             result = {
                 "url": url,
+                "title": title,
                 "mode": mode,
                 "selector": selector,
                 "content_length": len(md),
