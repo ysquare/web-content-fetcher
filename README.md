@@ -1,11 +1,13 @@
 <div align="center">
 
-# Web Content Fetcher
+# Web Content Fetcher (Enhanced Fork)
 
 **网页正文提取 · 永久免费 · 支持微信公众号**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+> 基于 [shirenchuang/web-content-fetcher](https://github.com/shirenchuang/web-content-fetcher) 改进，感谢原作者 **石臻** 的工作。
 
 </div>
 
@@ -15,7 +17,16 @@
 
 Web Content Fetcher 是一个轻量级的网页正文提取工具，能够自动将任意网页转换为干净的 Markdown 格式，保留标题、链接、图片和列表结构。
 
-**核心优势：**
+本仓库是在原项目基础上的增强版本，主要改进包括：
+
+- **更广泛的平台支持**：新增 36氪、InfoQ、今日头条、网易新闻等国内平台的 CSS 选择器
+- **uv 依赖管理**：采用 PEP 723 内联元数据，`uv run` 自动隔离解析依赖，无需全局安装
+- **代码块解析优化**：修复微信公众号代码片段的行号列表和连续 `<code>` 标签拼接问题
+- **Windows 兼容性**：修复 Windows 下 UTF-8 编码问题
+- **更健壮的提取逻辑**：优化 fast → stealth 自动降级策略
+- **经过实测验证**：20+ 平台实测通过
+
+**核心特性：**
 - Scrapling 优先提取，内置 fast / stealth 双模式，自动降级
 - Jina Reader 作为二级备选
 - 完美支持微信公众号、掘金、CSDN 等国内平台
@@ -30,7 +41,7 @@ Web Content Fetcher 是一个轻量级的网页正文提取工具，能够自动
 
 ```bash
 # Clone
-git clone https://github.com/shirenchuang/web-content-fetcher.git
+git clone https://github.com/ysquare/web-content-fetcher.git
 
 # Copy to Claude Code skills directory
 cp -r web-content-fetcher ~/.claude/skills/
@@ -163,39 +174,9 @@ URL 输入
 
 ---
 
-## 相关项目
+## 致谢
 
-### [Kuaifa（快发）](https://github.com/shirenchuang/kuaifa) — 公众号一键排版发布
-
-如果你需要将 Markdown 文章发布到微信公众号，推荐使用 **Kuaifa**：
-
-- 一键 Markdown 排版，支持多种主题
-- 自动上传图片到 CDN
-- 一键创建公众号草稿
-- 支持预览和发布
-
-```bash
-pip install kuaifa
-kuaifa publish your-article.md
-```
-
----
-
-## 作者
-
-<div align="center">
-
-**石臻说AI**
-
-AI科技博主 · 10+年大厂AI提效专家
-
-专注于个人提效、超级个体、AI 资讯
-
-<img src="qrcode_for_shizhen.jpg" width="200" alt="公众号二维码"/>
-
-*扫码关注公众号*
-
-</div>
+本项目 fork 自 [shirenchuang/web-content-fetcher](https://github.com/shirenchuang/web-content-fetcher)，由 **石臻**（石臻说AI）创建。感谢原作者的优秀工作和开源贡献。
 
 ---
 
