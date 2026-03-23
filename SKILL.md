@@ -15,6 +15,8 @@ description: >
 
 Given a URL, return its main content as clean Markdown — headings, links, images, lists, code blocks all preserved.
 
+**Default behavior:** Always save the fetched content to a local file using `--save`. The default save directory is `./download/` (relative to the user's working directory). The user can override the directory with `--save <dir>`.
+
 ## Extraction Strategy
 
 Always try **one method per URL** — don't cascade blindly. Pick the right one upfront.
@@ -35,8 +37,10 @@ URL
 ### Scrapling script
 
 ```bash
-uv run <SKILL_DIR>/scripts/fetch.py "<url>" [max_chars] [--stealth]
+uv run <SKILL_DIR>/scripts/fetch.py "<url>" [max_chars] [--stealth] [--save [dir]]
 ```
+
+**Always pass `--save`** so the content is persisted locally. The file is saved to `./download/` by default, with a filename derived from the URL (e.g., `sspai-post-73145.md`).
 
 `<SKILL_DIR>` is the directory where this SKILL.md lives. Resolve it before calling the script.
 
@@ -65,17 +69,20 @@ Use this table to pick the right mode on the first call:
 ## Script Options
 
 ```bash
-# Basic — auto-selects fast or stealth
-uv run <SKILL_DIR>/scripts/fetch.py "https://sspai.com/post/73145"
+# Basic — auto-selects fast or stealth, saves to ./download/
+uv run <SKILL_DIR>/scripts/fetch.py "https://sspai.com/post/73145" --save
 
 # Force stealth for known JS-heavy sites
-uv run <SKILL_DIR>/scripts/fetch.py "https://mp.weixin.qq.com/s/xxx" --stealth
+uv run <SKILL_DIR>/scripts/fetch.py "https://mp.weixin.qq.com/s/xxx" --stealth --save
+
+# Save to a custom directory
+uv run <SKILL_DIR>/scripts/fetch.py "https://sspai.com/post/73145" --save ./my-articles
 
 # Limit output to 15000 characters (default: 30000)
-uv run <SKILL_DIR>/scripts/fetch.py "https://example.com/article" 15000
+uv run <SKILL_DIR>/scripts/fetch.py "https://example.com/article" 15000 --save
 
-# JSON output with metadata (url, mode, selector, content_length)
-uv run <SKILL_DIR>/scripts/fetch.py "https://example.com" --json
+# JSON output with metadata (url, mode, selector, content_length, saved_to)
+uv run <SKILL_DIR>/scripts/fetch.py "https://example.com" --json --save
 ```
 
 ## Install Dependencies

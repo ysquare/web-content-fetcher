@@ -8,17 +8,23 @@ Universal web content extractor (Scrapling + html2text).
 Returns clean Markdown with headings, links, images, lists, and code blocks.
 
 Usage:
-  uv run fetch.py <url> [max_chars] [--stealth]
+  uv run fetch.py <url> [max_chars] [--stealth] [--save [dir]] [--json]
 
 Modes:
   (default)   Fast HTTP fetch via Fetcher — works for most sites (~1-3s)
   --stealth   Headless browser via StealthyFetcher — for JS-rendered or
               anti-scraping sites like WeChat, Zhihu, Juejin (~5-15s)
 
+Options:
+  --save [dir]  Save Markdown to a file. Default directory: ./download/
+                Filename is derived from the URL slug.
+  --json        Output as JSON with metadata.
+
 Examples:
   uv run fetch.py https://sspai.com/post/73145
-  uv run fetch.py https://mp.weixin.qq.com/s/xxx 30000 --stealth
-  uv run fetch.py https://zhuanlan.zhihu.com/p/12345 --stealth
+  uv run fetch.py https://sspai.com/post/73145 --save
+  uv run fetch.py https://sspai.com/post/73145 --save ./my-articles
+  uv run fetch.py https://mp.weixin.qq.com/s/xxx 30000 --stealth --save
 """
 
 import sys
@@ -26,6 +32,8 @@ import os
 import re
 import json
 import logging
+from pathlib import Path
+from urllib.parse import urlparse, unquote
 
 # Ensure UTF-8 output on Windows (avoid GBK encoding errors with Chinese content)
 if sys.platform == "win32":
@@ -241,6 +249,62 @@ def fetch(url, max_chars=30000, stealth=False):
     return md, selector, "fast"
 
 
+DEFAULT_SAVE_DIR = "download"
+
+
+def url_to_filename(url):
+    """
+    Derive a short, filesystem-safe filename (without extension) from a URL.
+    Examples:
+      https://sspai.com/post/73145          -> sspai-post-73145
+      https://mp.weixin.qq.com/s/AbC123     -> weixin-AbC123
+      https://zhuanlan.zhihu.com/p/12345    -> zhihu-p-12345
+      https://example.com/my-great-article  -> example-my-great-article
+    """
+    parsed = urlparse(url)
+    domain = parsed.hostname or "unknown"
+
+    # Simplify common domains
+    domain_short = domain.replace("www.", "")
+    for prefix in ("mp.", "zhuanlan.", "blog."):
+        domain_short = domain_short.replace(prefix, "")
+    # Take first part of domain (e.g., "sspai" from "sspai.com")
+    domain_short = domain_short.split(".")[0]
+
+    # Build slug from path
+    path = unquote(parsed.path).strip("/")
+    if not path:
+        path = "index"
+    # Replace separators with hyphens, keep only safe chars
+    slug = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff-]", "-", path)
+    slug = re.sub(r"-{2,}", "-", slug).strip("-")
+
+    # Truncate to avoid overly long filenames
+    name = f"{domain_short}-{slug}"[:80].rstrip("-")
+    return name
+
+
+def save_markdown(md, url, save_dir):
+    """Save markdown content to a .md file in save_dir. Returns the file path."""
+    dir_path = Path(save_dir)
+    dir_path.mkdir(parents=True, exist_ok=True)
+
+    filename = url_to_filename(url) + ".md"
+    filepath = dir_path / filename
+
+    # Avoid overwriting: append a number if file exists
+    if filepath.exists():
+        base = filepath.stem
+        for i in range(1, 100):
+            candidate = dir_path / f"{base}-{i}.md"
+            if not candidate.exists():
+                filepath = candidate
+                break
+
+    filepath.write_text(md, encoding="utf-8")
+    return str(filepath)
+
+
 def main():
     if len(sys.argv) < 2:
         print(
@@ -259,11 +323,28 @@ def main():
 
     stealth = "--stealth" in args
     json_output = "--json" in args
+
+    # Parse --save [dir]
+    save_dir = None
+    if "--save" in args:
+        idx = args.index("--save")
+        # Check if next arg is a directory (not another flag, not a number)
+        if idx + 1 < len(args) and not args[idx + 1].startswith("--") and not args[idx + 1].isdigit():
+            save_dir = args[idx + 1]
+            args = args[:idx] + args[idx + 2:]
+        else:
+            save_dir = DEFAULT_SAVE_DIR
+            args = args[:idx] + args[idx + 1:]
+
     args = [a for a in args if not a.startswith("--")]
     max_chars = int(args[0]) if args else 30000
 
     try:
         md, selector, mode = fetch(url, max_chars, stealth=stealth)
+
+        if save_dir:
+            filepath = save_markdown(md, url, save_dir)
+            print(f"Saved to: {filepath}", file=sys.stderr)
 
         if json_output:
             result = {
@@ -273,6 +354,8 @@ def main():
                 "content_length": len(md),
                 "content": md,
             }
+            if save_dir:
+                result["saved_to"] = filepath
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
             print(md)
